@@ -12,7 +12,7 @@ from pylab import savefig
 from pylab import grid
 from tensorflow.contrib.legacy_seq2seq.python.ops import seq2seq as seq2seq_lib
 from tensorflow.python.ops import variable_scope
-class myAutoEncoder():
+class myAutoEncoder_restore():
     def __init__(self,max_level,hidden_dim,train_filename="data_4base_5level.csv",test_filename="None"):
         data = pd.read_csv(train_filename, header=None)
 
@@ -32,7 +32,7 @@ class myAutoEncoder():
         else:
             testdata=pd.read_csv(test_filename,header=None)
             self.testdata=np.array(testdata)[:, 0:max_level] - 1
-            #self.data_X=np.concatenate((self.testdata,self.data_X),axis=0)
+            self.data_X=np.concatenate((self.testdata,self.data_X),axis=0)
 
         self.testlength = self.getLength(self.testdata)
         self._batch_num_test= int(len(self.testdata) / self._batch_size)
@@ -145,63 +145,35 @@ class myAutoEncoder():
         saver=tf.train.Saver()
 
         with tf.Session() as sess:
-            sess.run(tf.global_variables_initializer())
-            e_loss = []
-            e_acc = []
-            learning_rate = 5*1e-3
-            for epoch in range(self._epoch_num):
-                total_loss = []
-                total_acc = []
-                for batch in range(self._batch_num):
-                    batch_X,batch_y, batch_len = self.getNextBacth(self._batch_size, batch)
-                    feed = {self.x:batch_X,self.y:batch_y, self.seqlen:batch_len, self.learning_rate:learning_rate}
-                    acc,cost,_ = sess.run([accuracy,loss,optimizer],feed_dict=feed)
-                    total_loss.append(cost)
-                    total_acc.append(acc)
+            #sess.run(tf.global_variables_initializer())
+            saver.restore(sess, "savemodel/twornn.ckpt")
+            print("Model restored.")
+            learning_rate = 5 * 1e-3
+            hidden_code=[]
+            rnn_code=[]
+            total_acc = []
+            for test_batch in range(self._batch_num_test+1):
+                batch_testX,batch_y, batch_testlen = self.getNextTestBatch(self._batch_size, test_batch)
+                feed = {self.x: batch_testX, self.y:batch_y,self.seqlen: batch_testlen, self.learning_rate:learning_rate}
+                t, f, code, lro,acc= sess.run([truevalue, final_output,final_state,last_rnn_output,accuracy], feed_dict=feed)
+                code=code.reshape([-1,self._emb_dim])
+                hidden_code.append(code)
+                lro = lro.reshape([-1, self._emb_dim])
+                rnn_code.append(lro)
+                total_acc.append(acc)
+                #print("Batch: "+str(test_batch))
+                print("True"+str(t[0:self._max_length]))
+                print("Pred"+str(f[0:self._max_length]))
 
-                total_loss=np.sum(np.array(total_loss))
-                total_acc=np.mean(np.array(total_acc))
-                e_loss.append(total_loss)
-                e_acc.append(total_acc)
-                print("Epoch"+str(epoch)+":")
-                print("Loss: "+str(total_loss)+"  "+"Accuracy: "+str(total_acc))
-
-                if total_loss<600:
-                    learning_rate=5*1e-4
-                    #print("Learning rate changed.")
-
-
-                if epoch == self._epoch_num - 1 or total_loss<0.5:# or total_acc>0.985:
-                    hidden_code=[]
-                    rnn_code=[]
-                    total_acc = []
-                    for test_batch in range(self._batch_num_test+1):
-                        batch_testX,batch_y, batch_testlen = self.getNextTestBatch(self._batch_size, test_batch)
-                        feed = {self.x: batch_testX, self.y:batch_y,self.seqlen: batch_testlen, self.learning_rate:learning_rate}
-                        t, f, code, acc= sess.run([truevalue, final_output,final_state,accuracy], feed_dict=feed)
-                        code=code.reshape([-1,self._emb_dim])
-                        hidden_code.append(code)
-                        total_acc.append(acc)
-
-                        #print("Batch: "+str(test_batch))
-                        print("True"+str(t[0:self._max_length]))
-                        print("Pred"+str(f[0:self._max_length]))
-                    total_acc = np.mean(np.array(total_acc))
-                    print("Accuracy:"+str(total_acc))
-                    codes=np.array(hidden_code).reshape(-1,self._emb_dim)
-                    df=pd.DataFrame(codes[0:len(self.testdata),:])
-                    #file_hidden="twornn_hidden"+train_filename[4:len(train_filename)-4]+"_"+str(self._emb_dim)+".csv"
-                    file_hidden="code1.csv"
-                    df.to_csv(file_hidden,float_format='%.5f')
-                    #df = pd.DataFrame(np.array(rnn_code).reshape(-1, self._emb_dim))
-                    #df.to_csv("twornn_output_airline12.csv", float_format='%.5f')
-
-                    break
-                    # Save the variables to disk.
-            save_path = saver.save(sess, "savemodel/twornn.ckpt")
-            print ("Model saved in file: "+save_path)
-
-            self.plot(np.array(e_loss), np.array(e_acc))
+            total_acc = np.mean(np.array(total_acc))
+            print("Accuracy:" + str(total_acc))
+            codes=np.array(hidden_code).reshape(-1,self._emb_dim)
+            df=pd.DataFrame(codes[0:len(self.testdata),:])
+            #file_hidden="twornn_hidden"+train_filename[4:len(train_filename)-4]+"_"+str(self._emb_dim)+".csv"
+            file_hidden="code2.csv"
+            df.to_csv(file_hidden,float_format='%.5f')
+            #df = pd.DataFrame(np.array(rnn_code).reshape(-1, self._emb_dim))
+            #df.to_csv("twornn_output_airline12.csv", float_format='%.5f')
 
 
         return
@@ -319,8 +291,8 @@ if __name__ == '__main__':
 
     num_base=4
     max_level=28
-    hidden_dim=20
+    hidden_dim=15
    #filename="data_"+str(num_base)+"base_"+str(max_level)+"level.csv"
     train_filename="kervec_100000.csv"
     test_filename="kervec_1000.csv"
-    myAutoEncoder(max_level,hidden_dim,train_filename,test_filename=test_filename)
+    myAutoEncoder_restore(max_level,hidden_dim,train_filename,test_filename=test_filename)
